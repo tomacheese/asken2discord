@@ -169,12 +169,22 @@ class AskenClient:
 
         A no-op if the session's existing cookies are already authenticated:
         asken.jp then redirects `GET /login` to the top page instead of
-        returning the login form, so the redirect itself (rather than the
-        page content, which may or may not mention "logout") is the signal.
+        returning the login form. Require both the redirect and a
+        "logout"-link marker on the landing page before treating this as
+        already-authenticated, since either signal alone (an unrelated
+        redirect away from `/login`, or a coincidental "logout" match
+        elsewhere on the page) could otherwise misclassify a genuine
+        failure.
         """
         r = self.session.get(f"{BASE_URL}/login", timeout=30)
         r.raise_for_status()
-        if r.history and urlparse(r.url).path.rstrip("/") != "/login":
+        redirected_away_from_login = (
+            r.history and urlparse(r.url).path.rstrip("/") != "/login"
+        )
+        already_logged_in = redirected_away_from_login and (
+            "ログアウト" in r.text or "logout" in r.text.lower()
+        )
+        if already_logged_in:
             return
         m = CSRF_RE.search(r.text)
         if not m:
