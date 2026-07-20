@@ -9,6 +9,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from types import TracebackType
+from urllib.parse import urlparse
 
 import requests
 
@@ -164,9 +165,27 @@ class AskenClient:
         self.session.close()
 
     def login(self) -> None:
-        """Authenticate against asken.jp, raising LoginError on failure."""
+        """Authenticate against asken.jp, raising LoginError on failure.
+
+        A no-op if the session's existing cookies are already authenticated:
+        asken.jp then redirects `GET /login` to the top page instead of
+        returning the login form. Require both the redirect and a
+        "logout"-link marker on the landing page before treating this as
+        already-authenticated, since either signal alone (an unrelated
+        redirect away from `/login`, or a coincidental "logout" match
+        elsewhere on the page) could otherwise misclassify a genuine
+        failure.
+        """
         r = self.session.get(f"{BASE_URL}/login", timeout=30)
         r.raise_for_status()
+        redirected_away_from_login = (
+            r.history and urlparse(r.url).path.rstrip("/") != "/login"
+        )
+        already_logged_in = redirected_away_from_login and (
+            "ログアウト" in r.text or "logout" in r.text.lower()
+        )
+        if already_logged_in:
+            return
         m = CSRF_RE.search(r.text)
         if not m:
             raise LoginError("CSRF token not found on login page")
