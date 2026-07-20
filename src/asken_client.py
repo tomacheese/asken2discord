@@ -9,6 +9,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from types import TracebackType
+from urllib.parse import urlparse
 
 import requests
 
@@ -131,15 +132,6 @@ class DailySummary:
     nutrition: list[NutritionRow]
 
 
-def _looks_logged_in(body_html: str) -> bool:
-    """Whether a response body shows a "ログアウト"/"logout" link.
-
-    asken.jp renders this link only for an authenticated session, so its
-    presence distinguishes "already logged in" from a genuine login failure.
-    """
-    return "ログアウト" in body_html or "logout" in body_html.lower()
-
-
 class LoginError(RuntimeError):
     """Raised when authentication to asken.jp does not succeed."""
 
@@ -177,15 +169,15 @@ class AskenClient:
 
         A no-op if the session's existing cookies are already authenticated:
         asken.jp then redirects `GET /login` to the top page instead of
-        returning the login form, so `_csrfToken` is absent for a reason
-        other than failure.
+        returning the login form, so the redirect itself (rather than the
+        page content, which may or may not mention "logout") is the signal.
         """
         r = self.session.get(f"{BASE_URL}/login", timeout=30)
         r.raise_for_status()
+        if r.history and urlparse(r.url).path.rstrip("/") != "/login":
+            return
         m = CSRF_RE.search(r.text)
         if not m:
-            if _looks_logged_in(r.text):
-                return
             raise LoginError("CSRF token not found on login page")
         csrf = m.group(1)
 
@@ -200,7 +192,7 @@ class AskenClient:
             timeout=30,
         )
         r2.raise_for_status()
-        if not _looks_logged_in(r2.text):
+        if "ログアウト" not in r2.text and "logout" not in r2.text.lower():
             raise LoginError("Login failed (no logout link found in response)")
 
     def fetch_meal(self, meal_type: str, date: str) -> MealRecord:
