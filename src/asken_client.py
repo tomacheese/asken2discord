@@ -131,6 +131,15 @@ class DailySummary:
     nutrition: list[NutritionRow]
 
 
+def _looks_logged_in(body_html: str) -> bool:
+    """Whether a response body shows a "ログアウト"/"logout" link.
+
+    asken.jp renders this link only for an authenticated session, so its
+    presence distinguishes "already logged in" from a genuine login failure.
+    """
+    return "ログアウト" in body_html or "logout" in body_html.lower()
+
+
 class LoginError(RuntimeError):
     """Raised when authentication to asken.jp does not succeed."""
 
@@ -164,14 +173,19 @@ class AskenClient:
         self.session.close()
 
     def login(self) -> None:
-        """Authenticate against asken.jp, raising LoginError on failure."""
-        # 前回サイクルの認証済み Cookie が残っていると /login がトップページへ
-        # リダイレクトされ _csrfToken が取得できなくなるため、都度クリアする
-        self.session.cookies.clear()
+        """Authenticate against asken.jp, raising LoginError on failure.
+
+        A no-op if the session's existing cookies are already authenticated:
+        asken.jp then redirects `GET /login` to the top page instead of
+        returning the login form, so `_csrfToken` is absent for a reason
+        other than failure.
+        """
         r = self.session.get(f"{BASE_URL}/login", timeout=30)
         r.raise_for_status()
         m = CSRF_RE.search(r.text)
         if not m:
+            if _looks_logged_in(r.text):
+                return
             raise LoginError("CSRF token not found on login page")
         csrf = m.group(1)
 
@@ -186,7 +200,7 @@ class AskenClient:
             timeout=30,
         )
         r2.raise_for_status()
-        if "ログアウト" not in r2.text and "logout" not in r2.text.lower():
+        if not _looks_logged_in(r2.text):
             raise LoginError("Login failed (no logout link found in response)")
 
     def fetch_meal(self, meal_type: str, date: str) -> MealRecord:
