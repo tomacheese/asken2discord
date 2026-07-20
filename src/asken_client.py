@@ -165,6 +165,9 @@ class AskenClient:
 
     def login(self) -> None:
         """Authenticate against asken.jp, raising LoginError on failure."""
+        # 前回サイクルの認証済み Cookie が残っていると /login がトップページへ
+        # リダイレクトされ _csrfToken が取得できなくなるため、都度クリアする
+        self.session.cookies.clear()
         r = self.session.get(f"{BASE_URL}/login", timeout=30)
         r.raise_for_status()
         m = CSRF_RE.search(r.text)
