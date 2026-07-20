@@ -44,7 +44,12 @@ class DiscordWebhookClient:
         """Close the underlying HTTP session."""
         self.session.close()
 
-    def _multipart(self, content: str, files: list[tuple[str, bytes, str]]) -> dict:
+    def _multipart(
+        self,
+        content: str,
+        files: list[tuple[str, bytes, str]],
+        embeds: list[dict] | None = None,
+    ) -> dict:
         """Build the multipart payload for a webhook create/edit request.
 
         `attachments` and `embeds` are always sent explicitly: on an edit the
@@ -54,7 +59,7 @@ class DiscordWebhookClient:
         attachments = [
             {"id": idx, "filename": filename} for idx, (filename, _, _) in enumerate(files)
         ]
-        payload = {"content": content, "attachments": attachments, "embeds": []}
+        payload = {"content": content, "attachments": attachments, "embeds": embeds or []}
         multipart_files = {
             "payload_json": (None, json.dumps(payload, ensure_ascii=False), "application/json")
         }
@@ -62,11 +67,16 @@ class DiscordWebhookClient:
             multipart_files[f"files[{idx}]"] = (filename, file_content, content_type)
         return multipart_files
 
-    def post_message(self, content: str, files: list[tuple[str, bytes, str]]) -> str:
+    def post_message(
+        self,
+        content: str,
+        files: list[tuple[str, bytes, str]],
+        embeds: list[dict] | None = None,
+    ) -> str:
         """Post a new message and return its message id."""
         resp = self.session.post(
             f"{self.webhook_url}?wait=true",
-            files=self._multipart(content, files),
+            files=self._multipart(content, files, embeds),
             timeout=30,
         )
         if resp.status_code >= 300:
@@ -74,16 +84,20 @@ class DiscordWebhookClient:
         return resp.json()["id"]
 
     def edit_message(
-        self, message_id: str, content: str, files: list[tuple[str, bytes, str]]
+        self,
+        message_id: str,
+        content: str,
+        files: list[tuple[str, bytes, str]],
+        embeds: list[dict] | None = None,
     ) -> None:
-        """Edit an existing message, replacing its attachments wholesale.
+        """Edit an existing message, replacing its attachments and embeds wholesale.
 
         Raises MessageNotFound on a 404 so the caller can fall back to posting a
         new message when the original was deleted.
         """
         resp = self.session.patch(
             f"{self.webhook_url}/messages/{message_id}",
-            files=self._multipart(content, files),
+            files=self._multipart(content, files, embeds),
             timeout=30,
         )
         if resp.status_code == 404:
