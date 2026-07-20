@@ -1,14 +1,18 @@
-"""Build the Discord message body for a single (date, meal) record.
+"""Build the Discord message bodies for a (date, meal) record and a daily summary.
 
-Messages are plain text plus image attachments; embeds are deliberately not used.
-Only real data (menu, calories, photos, advice) is rendered, so self-evident
-fields such as a meal-type-only description are omitted.
+Meal messages are plain text plus image attachments. Only real data (menu,
+calories, photos) is rendered, so self-evident fields such as a meal-type-only
+description are omitted. asken's daily summary covers the whole day rather than
+a single meal, so it is rendered as its own embed message instead of being
+attached to a meal message.
 """
 from __future__ import annotations
 
 import datetime as dt
 
-from asken_client import Advice, MealRecord
+from asken_client import DailySummary, MealRecord
+
+_STATUS_EMOJI = {"over": "🔺", "fit": "✅", "short": "🔻"}
 
 
 def _format_title(date_str: str, meal_label: str) -> str:
@@ -35,7 +39,6 @@ def build_meal_message(
     *,
     date_str: str,
     meal: MealRecord,
-    advice: Advice | None,
     photo_files: list[tuple[str, bytes]],
 ) -> tuple[str, list[tuple[str, bytes, str]]]:
     """Build the Discord webhook (content, files) for one (date, meal) record.
@@ -50,11 +53,6 @@ def build_meal_message(
         parts.append("")
         parts.append(f"計{meal.total_energy_kcal}kcal")
 
-    if advice:
-        parts.append("")
-        parts.append(advice.title)
-        parts.append(advice.body)
-
     content = "\n".join(parts)
 
     files: list[tuple[str, bytes, str]] = [
@@ -62,3 +60,25 @@ def build_meal_message(
     ]
 
     return content, files
+
+
+def build_summary_embed(*, date_str: str, summary: DailySummary) -> dict:
+    """Build the Discord embed for one day's nutrition summary.
+
+    Using an embed, rather than a plain-text message, gives the comment and
+    the nutrition figures their own visually separated container, so no
+    extra code-block formatting is needed for readability.
+    """
+    fields = [
+        {
+            "name": f"{row.name} {_STATUS_EMOJI.get(row.status, '')}".strip(),
+            "value": f"{row.value}(目安 {row.target_range})",
+            "inline": True,
+        }
+        for row in summary.nutrition
+    ]
+    return {
+        "title": _format_title(date_str, "サマリー"),
+        "description": summary.comment,
+        "fields": fields,
+    }

@@ -1,10 +1,11 @@
-"""Long-running process that fetches asken meal records and posts or edits them
-in Discord as plain text with image attachments.
+"""Long-running process that fetches asken meal records and daily summaries and
+posts or edits them in Discord: meals as plain text with image attachments, the
+daily summary as an embed.
 
 Scheduling is handled by this process's own loop rather than cron or a timer, so
 the container only needs to stay running. Each cycle logs in to asken, fetches the
 tracked days and meal types, and posts or edits the Discord message for any meal
-whose rendered content has changed since the last cycle.
+or summary whose rendered content has changed since the last cycle.
 """
 from __future__ import annotations
 
@@ -22,9 +23,9 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from asken_client import MEAL_TYPES, Advice, AskenClient, LoginError, MealRecord
+from asken_client import MEAL_TYPES, AskenClient, LoginError, MealRecord
 from discord_client import DiscordError, DiscordWebhookClient, MessageNotFound
-from message_builder import build_meal_message
+from message_builder import build_meal_message, build_summary_embed
 import state as state_store
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -37,7 +38,13 @@ logger = logging.getLogger("asken2discord")
 
 # Bump when message_builder's output format changes: the recomputed hash then
 # stops matching the stored one, forcing already-posted messages to be re-rendered.
-MESSAGE_FORMAT_VERSION = 3
+MESSAGE_FORMAT_VERSION = 6
+
+# State slot key for the daily summary. This must stay "advice": it is the key
+# under which already-posted summary messages are persisted in state.json, so
+# changing it would orphan those messages and post duplicates instead of
+# editing them in place.
+SUMMARY_SLOT_KEY = "advice"
 
 _shutdown = threading.Event()
 
@@ -76,32 +83,64 @@ class Config:
         )
 
 
-def content_hash(meal: MealRecord, advice_text: str | None) -> str:
-    """Compute a hash covering everything that affects the rendered message."""
+def content_hash(meal: MealRecord) -> str:
+    """Compute a hash covering everything that affects the rendered meal message."""
     payload = {
         "format_version": MESSAGE_FORMAT_VERSION,
         "items": meal.items,
         "photo_urls": meal.photo_urls,
-        "advice": advice_text,
     }
     blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-def matched_advice(advice: Advice | None, meal_label: str) -> Advice | None:
-    """Return the advice only when its title refers to this meal.
+def day_meals_hash(meals: list[MealRecord]) -> str:
+    """Compute a hash of a day's entered meal items, used to gate summary updates.
 
-    asken exposes a single advice per day (for the last meal recorded that day),
-    so the meal it applies to is inferred from the meal label in its title.
+    asken rephrases the summary comment with a different random variant on every
+    fetch even when nothing was entered, so hashing the comment text itself would
+    make the message get "updated" every cycle. Hashing the day's meal items
+    instead means the summary message is only refreshed when what was actually
+    entered changes.
     """
-    if advice and meal_label in advice.title:
-        return advice
-    return None
+    payload = {
+        "format_version": MESSAGE_FORMAT_VERSION,
+        "items": [meal.items for meal in meals],
+    }
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def track_dates(today: dt.date, num_days: int) -> list[dt.date]:
     """Return the dates to track, oldest first, ending at today."""
     return [today - dt.timedelta(days=i) for i in range(num_days - 1, -1, -1)]
+
+
+def _post_or_edit(
+    discord: DiscordWebhookClient,
+    slot: dict | None,
+    content: str,
+    files: list[tuple[str, bytes, str]],
+    *,
+    log_context: str,
+    embeds: list[dict] | None = None,
+) -> str | None:
+    """Post a new message or edit the slot's existing one, returning the message id.
+
+    Returns None (instead of raising) on a Discord failure, so the caller can
+    skip this item but keep processing the rest of the cycle.
+    """
+    try:
+        if slot:
+            try:
+                discord.edit_message(slot["message_id"], content, files, embeds)
+                return slot["message_id"]
+            except MessageNotFound:
+                return discord.post_message(content, files, embeds)
+        return discord.post_message(content, files, embeds)
+    except (DiscordError, requests.RequestException):
+        logger.exception("Discord post/edit failed for %s", log_context)
+        return None
 
 
 def run_cycle(
@@ -118,16 +157,13 @@ def run_cycle(
 
     for date in track_dates(today, num_days):
         date_str = date.isoformat()
-        advice = client.fetch_advice(date_str)
+        meals = {meal_type: client.fetch_meal(meal_type, date_str) for meal_type in MEAL_TYPES}
 
-        for meal_type in MEAL_TYPES:
-            meal = client.fetch_meal(meal_type, date_str)
+        for meal_type, meal in meals.items():
             if not meal.has_content:
                 continue
 
-            advice_for_meal = matched_advice(advice, meal.meal_label)
-            advice_text = advice_for_meal.body if advice_for_meal else None
-            new_hash = content_hash(meal, advice_text)
+            new_hash = content_hash(meal)
 
             slot = state_store.get_slot(state, date_str, meal_type)
             if slot and slot["hash"] == new_hash:
@@ -144,22 +180,13 @@ def run_cycle(
             message_content, files = build_meal_message(
                 date_str=date_str,
                 meal=meal,
-                advice=advice_for_meal,
                 photo_files=photo_files,
             )
 
-            try:
-                if slot:
-                    try:
-                        discord.edit_message(slot["message_id"], message_content, files)
-                        message_id = slot["message_id"]
-                    except MessageNotFound:
-                        message_id = discord.post_message(message_content, files)
-                else:
-                    message_id = discord.post_message(message_content, files)
-            except (DiscordError, requests.RequestException):
-                # Skip this meal but keep processing the rest of the cycle.
-                logger.exception("Discord post/edit failed for %s %s", date_str, meal_type)
+            message_id = _post_or_edit(
+                discord, slot, message_content, files, log_context=f"{date_str} {meal_type}"
+            )
+            if message_id is None:
                 continue
 
             state_store.set_slot(
@@ -172,6 +199,35 @@ def run_cycle(
                 "edited" if slot else "posted",
                 message_id,
             )
+
+        summary = client.fetch_summary(date_str)
+        if summary:
+            new_day_hash = day_meals_hash(list(meals.values()))
+            summary_slot = state_store.get_slot(state, date_str, SUMMARY_SLOT_KEY)
+            if not summary_slot or summary_slot["hash"] != new_day_hash:
+                embed = build_summary_embed(date_str=date_str, summary=summary)
+                message_id = _post_or_edit(
+                    discord,
+                    summary_slot,
+                    "",
+                    [],
+                    log_context=f"{date_str} summary",
+                    embeds=[embed],
+                )
+                if message_id is not None:
+                    state_store.set_slot(
+                        state,
+                        date_str,
+                        SUMMARY_SLOT_KEY,
+                        content_hash=new_day_hash,
+                        message_id=message_id,
+                    )
+                    logger.info(
+                        "%s summary -> %s (message_id=%s)",
+                        date_str,
+                        "edited" if summary_slot else "posted",
+                        message_id,
+                    )
 
     return state
 

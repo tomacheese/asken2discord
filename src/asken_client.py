@@ -1,9 +1,10 @@
-"""Client for logging in to asken.jp and fetching meal records and advice.
+"""Client for logging in to asken.jp and fetching meal records and daily summaries.
 
 Uses only `requests`; no browser automation is involved.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 from dataclasses import dataclass, field
@@ -27,9 +28,58 @@ MEAL_LABEL = {
 EAT_DATAS_RE = re.compile(r"V2WspMeal\.eatDatas\s*=\s*(\{.*?\});", re.DOTALL)
 CSRF_RE = re.compile(r'name="_csrfToken"\s+value="([^"]+)"')
 PHOTO_PATH_RE = re.compile(r"/meal_photo/my_photo/[^\"'\s]+")
-ADVICE_TITLE_RE = re.compile(
-    r'<div id="premium_fuki_comment">\s*<h4>\s*(.*?)\s*</h4>(.*?)</div>', re.DOTALL
+SUMMARY_COMMENT_RE = re.compile(
+    r'<div id="fuki">\s*<h4>.*?</h4>(.*?)</div>', re.DOTALL
 )
+# Wraps only the "(?)" help-icon link next to the health score; carries no content.
+SUMMARY_HELP_ICON_RE = re.compile(r'<span class="small">.*?</span>', re.DOTALL)
+# asken separates ranked menu items with runs of 2+ ideographic spaces; break them
+# onto their own lines instead of leaving them run together.
+SUMMARY_LIST_ITEM_RE = re.compile("　{2,}")
+# Rows of the day's nutrition table (the "pgraph_eiyo1" block), one per nutrient:
+# name, over/fit/short status, actual intake, and the target range.
+NUTRITION_ROW_RE = re.compile(
+    r'<li class="title">([^<]+)</li>\s*'
+    r'<li class="status ([a-z]+)">[^<]*</li>\s*'
+    r'<li class="val fn10">([^<]+)</li>\s*'
+    r'<li class="center fn10">([^<]+)</li>'
+)
+
+_BR_MARKER = "\x00"
+_LIST_BREAK_MARKER = "\x01"
+
+
+def _clean_summary_comment(body_html: str) -> str:
+    """Turn the summary comment's inner HTML into readable plain text.
+
+    `<br>` and ranked-item separators are swapped for sentinel characters
+    before whitespace collapsing, so the source markup's incidental indentation
+    newlines are discarded while intentional line breaks survive.
+    """
+    text = re.sub(r"<!--.*?-->", "", body_html, flags=re.DOTALL)
+    text = SUMMARY_HELP_ICON_RE.sub("", text)
+    text = re.sub(r"<br\s*/?>", _BR_MARKER, text)
+    text = SUMMARY_LIST_ITEM_RE.sub(_LIST_BREAK_MARKER, text)
+    text = re.sub(r"\s+", " ", text)
+    text = text.replace(_BR_MARKER, "\n").replace(_LIST_BREAK_MARKER, "\n")
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    # The health-score span's indentation collapses into a stray space before "は".
+    text = re.sub(r"健康度\s+は", "健康度は", text)
+
+    lines = [line.strip() for line in text.splitlines()]
+    cleaned: list[str] = []
+    prev_blank = True
+    for line in lines:
+        if line:
+            cleaned.append(line)
+            prev_blank = False
+        elif not prev_blank:
+            cleaned.append("")
+            prev_blank = True
+    while cleaned and cleaned[-1] == "":
+        cleaned.pop()
+    return "\n".join(cleaned)
 
 
 @dataclass
@@ -59,11 +109,26 @@ class MealRecord:
 
 
 @dataclass(frozen=True)
-class Advice:
-    """A daily advice comment parsed from asken."""
+class NutritionRow:
+    """One nutrient's daily intake, as computed by asken."""
 
-    title: str
-    body: str
+    name: str
+    status: str  # "over" | "fit" | "short"
+    value: str
+    target_range: str
+
+
+@dataclass(frozen=True)
+class DailySummary:
+    """A day's nutrition summary parsed from asken.
+
+    The comment's heading is a generic per-user greeting with no real
+    information ("<name>さんのアドバイスをお伝えしますね。"), so only the body
+    is kept as `comment`.
+    """
+
+    comment: str
+    nutrition: list[NutritionRow]
 
 
 class LoginError(RuntimeError):
@@ -156,23 +221,23 @@ class AskenClient:
             photo_urls=list(photo_hashes.values()),
         )
 
-    def fetch_advice(self, date: str) -> Advice | None:
-        """Fetch the daily advice for a date, or None if there is none."""
-        r = self.session.get(
-            f"{BASE_URL}/wsp/advice", params={"diary_date": date}, timeout=30
-        )
+    def fetch_summary(self, date: str) -> DailySummary | None:
+        """Fetch the daily nutrition summary for a date, or None if there is none.
+
+        The date must be passed as a path segment (`/wsp/advice/{date}`); the
+        endpoint silently ignores a `diary_date` query parameter and always
+        returns today's data instead.
+        """
+        r = self.session.get(f"{BASE_URL}/wsp/advice/{date}", timeout=30)
         r.raise_for_status()
-        m = ADVICE_TITLE_RE.search(r.text)
+        m = SUMMARY_COMMENT_RE.search(r.text)
         if not m:
             return None
-        title = re.sub(r"\s+", " ", m.group(1)).strip()
-        body_html = m.group(2)
-        body_text = re.sub(r"<br\s*/?>", "\n", body_html)
-        body_text = re.sub(r"<[^>]+>", "", body_text)
-        body_text = "\n".join(
-            line.strip() for line in body_text.splitlines() if line.strip()
-        )
-        return Advice(title=title, body=body_text)
+        nutrition = [
+            NutritionRow(name=name, status=status, value=value, target_range=target_range)
+            for name, status, value, target_range in NUTRITION_ROW_RE.findall(r.text)
+        ]
+        return DailySummary(comment=_clean_summary_comment(m.group(1)), nutrition=nutrition)
 
     def download_photo(self, url_path: str) -> bytes:
         """Download a meal photo and return its raw bytes."""
