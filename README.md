@@ -72,6 +72,7 @@ docker run --rm \
 | `STATE_FILE` | `/state/state.json` | 投稿済みメッセージの状態を保存するファイル |
 | `DATA_DIR` | `/data` | 取得したデータ・写真のローカル保存先 |
 | `RUN_ONCE` | (未設定) | `1`/`true` を指定すると1サイクルのみ実行して終了 (動作確認用) |
+| `SENTRY_DSN` | (未設定) | Sentry/GlitchTip の DSN。設定すると `logger.exception()` で捕捉した未処理エラーが送信される (未設定時は送信自体が無効化される) |
 
 必須の環境変数 (`ASKEN_USERNAME` / `ASKEN_PASSWORD` / `DISCORD_WEBHOOK`) が未設定の場合、アプリは起動時にエラー終了します。
 
