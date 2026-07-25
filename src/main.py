@@ -22,6 +22,7 @@ from types import FrameType
 from zoneinfo import ZoneInfo
 
 import requests
+import sentry_sdk
 
 from asken_client import MEAL_TYPES, AskenClient, LoginError, MealRecord
 from discord_client import DiscordError, DiscordWebhookClient, MessageNotFound
@@ -29,6 +30,13 @@ from message_builder import build_meal_message, build_summary_embed
 import state as state_store
 
 JST = ZoneInfo("Asia/Tokyo")
+
+# Disabled automatically when SENTRY_DSN is unset, so this is safe to call
+# unconditionally rather than gating it on the variable being present.
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN"),
+    traces_sample_rate=0.0,
+)
 
 logging.basicConfig(
     level=logging.INFO,
