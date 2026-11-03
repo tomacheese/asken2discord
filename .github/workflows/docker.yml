@@ -21,14 +21,14 @@ on:
       - closed
 
 concurrency:
-  # Include event_name so pull_request and pull_request_target runs do not cancel each other
+  # event_name を含めることで、pull_request と pull_request_target の実行が互いにキャンセルされないようにする
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
   post-approval-request:
     name: Post approval request
     runs-on: ubuntu-latest
-    # Post the approval request only for fork PRs (not needed on closed)
+    # 承認依頼のコメントは fork PR にだけ投稿する (closed では不要)
     if: github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && github.event.action != 'closed'
     continue-on-error: true
     permissions:
@@ -60,9 +60,9 @@ jobs:
     name: Approval gate
     runs-on: ubuntu-latest
     needs: post-approval-request
-    # Always run, regardless of the post-approval-request result
+    # 承認依頼の投稿結果にかかわらず常に実行する
     if: always()
-    # Manual approval via Environment is required only for non-closed fork PRs
+    # Environment による手動承認が必要なのは、closed 以外の fork PR だけ
     environment: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name != github.repository && github.event.action != 'closed' && 'fork-pr-build' || '' }}
     permissions: {}
     steps:

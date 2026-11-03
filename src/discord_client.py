@@ -1,4 +1,4 @@
-"""Thin client for posting to and editing messages on a Discord webhook."""
+"""Discord Webhook へのメッセージ投稿・編集を行う薄いクライアント。"""
 from __future__ import annotations
 
 import json
@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class DiscordError(RuntimeError):
-    """Raised when the Discord API returns a non-success status."""
+    """Discord API が成功以外のステータスを返したときに送出する。"""
 
 
 class MessageNotFound(Exception):
-    """Raised when editing a message that no longer exists (e.g. manually deleted)."""
+    """存在しないメッセージ (手動削除など) を編集しようとしたときに送出する。"""
 
     def __init__(self, message_id: str):
         super().__init__(f"message {message_id} not found")
@@ -23,7 +23,7 @@ class MessageNotFound(Exception):
 
 
 class DiscordWebhookClient:
-    """Session-backed wrapper around a single Discord incoming webhook URL."""
+    """単一の Discord Incoming Webhook URL を扱う、セッション付きのラッパー。"""
 
     def __init__(self, webhook_url: str):
         self.webhook_url = webhook_url.rstrip("/")
@@ -41,7 +41,7 @@ class DiscordWebhookClient:
         self.close()
 
     def close(self) -> None:
-        """Close the underlying HTTP session."""
+        """内部の HTTP セッションを閉じる。"""
         self.session.close()
 
     def _multipart(
@@ -50,11 +50,11 @@ class DiscordWebhookClient:
         files: list[tuple[str, bytes, str]],
         embeds: list[dict] | None = None,
     ) -> dict:
-        """Build the multipart payload for a webhook create/edit request.
+        """Webhook の作成・編集リクエスト用の multipart ペイロードを組み立てる。
 
-        `attachments` and `embeds` are always sent explicitly: on an edit the
-        Discord API otherwise keeps the message's existing attachments and embeds,
-        so old files pile up and embeds from an earlier message format linger.
+        `attachments` と `embeds` は常に明示的に送る。編集時に省略すると Discord API が
+        既存の添付ファイルと embed を保持するため、古いファイルが溜まり、
+        過去のメッセージ形式の embed が残ってしまう。
         """
         attachments = [
             {"id": idx, "filename": filename} for idx, (filename, _, _) in enumerate(files)
@@ -73,7 +73,7 @@ class DiscordWebhookClient:
         files: list[tuple[str, bytes, str]],
         embeds: list[dict] | None = None,
     ) -> str:
-        """Post a new message and return its message id."""
+        """新規メッセージを投稿し、そのメッセージ ID を返す。"""
         resp = self.session.post(
             f"{self.webhook_url}?wait=true",
             files=self._multipart(content, files, embeds),
@@ -90,10 +90,10 @@ class DiscordWebhookClient:
         files: list[tuple[str, bytes, str]],
         embeds: list[dict] | None = None,
     ) -> None:
-        """Edit an existing message, replacing its attachments and embeds wholesale.
+        """既存メッセージを編集し、添付ファイルと embed を丸ごと置き換える。
 
-        Raises MessageNotFound on a 404 so the caller can fall back to posting a
-        new message when the original was deleted.
+        404 のときは MessageNotFound を送出する。元のメッセージが削除されていた場合に、
+        呼び出し側が新規投稿へフォールバックできるようにするため。
         """
         resp = self.session.patch(
             f"{self.webhook_url}/messages/{message_id}",

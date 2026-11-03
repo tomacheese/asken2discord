@@ -1,6 +1,6 @@
-"""Client for logging in to asken.jp and fetching meal records and daily summaries.
+"""asken.jp にログインし、食事記録と日次サマリーを取得するクライアント。
 
-Uses only `requests`; no browser automation is involved.
+`requests` だけを使い、ブラウザ自動化は使わない。
 """
 from __future__ import annotations
 
@@ -32,13 +32,13 @@ PHOTO_PATH_RE = re.compile(r"/meal_photo/my_photo/[^\"'\s]+")
 SUMMARY_COMMENT_RE = re.compile(
     r'<div id="fuki">\s*<h4>.*?</h4>(.*?)</div>', re.DOTALL
 )
-# Wraps only the "(?)" help-icon link next to the health score; carries no content.
+# 健康度の横にある「(?)」ヘルプアイコンのリンクだけを囲む。内容は持たない。
 SUMMARY_HELP_ICON_RE = re.compile(r'<span class="small">.*?</span>', re.DOTALL)
-# asken separates ranked menu items with runs of 2+ ideographic spaces; break them
-# onto their own lines instead of leaving them run together.
+# あすけんは順位付きメニューを 2 個以上連続する全角スペースで区切っている。
+# つなげたままにせず、それぞれ別の行に分ける。
 SUMMARY_LIST_ITEM_RE = re.compile("　{2,}")
-# Rows of the day's nutrition table (the "pgraph_eiyo1" block), one per nutrient:
-# name, over/fit/short status, actual intake, and the target range.
+# 1 日の栄養テーブル ("pgraph_eiyo1" ブロック) の行。栄養素ごとに 1 行で、
+# 名前・過不足の状態 (over/fit/short)・摂取量・目安範囲を持つ。
 NUTRITION_ROW_RE = re.compile(
     r'<li class="title">([^<]+)</li>\s*'
     r'<li class="status ([a-z]+)">[^<]*</li>\s*'
@@ -51,11 +51,10 @@ _LIST_BREAK_MARKER = "\x01"
 
 
 def _clean_summary_comment(body_html: str) -> str:
-    """Turn the summary comment's inner HTML into readable plain text.
+    """サマリーコメントの内側の HTML を、読みやすいプレーンテキストに変換する。
 
-    `<br>` and ranked-item separators are swapped for sentinel characters
-    before whitespace collapsing, so the source markup's incidental indentation
-    newlines are discarded while intentional line breaks survive.
+    `<br>` と順位付き項目の区切りは、空白を畳む前にセンチネル文字へ置き換える。
+    これにより、元マークアップのインデント由来の改行は捨て、意図した改行だけを残せる。
     """
     text = re.sub(r"<!--.*?-->", "", body_html, flags=re.DOTALL)
     text = SUMMARY_HELP_ICON_RE.sub("", text)
@@ -65,7 +64,7 @@ def _clean_summary_comment(body_html: str) -> str:
     text = text.replace(_BR_MARKER, "\n").replace(_LIST_BREAK_MARKER, "\n")
     text = re.sub(r"<[^>]+>", "", text)
     text = html.unescape(text)
-    # The health-score span's indentation collapses into a stray space before "は".
+    # 健康度の span のインデントが畳まれ、「は」の前に余分な空白が残る。
     text = re.sub(r"健康度\s+は", "健康度は", text)
 
     lines = [line.strip() for line in text.splitlines()]
@@ -85,7 +84,7 @@ def _clean_summary_comment(body_html: str) -> str:
 
 @dataclass
 class MealRecord:
-    """A single meal's menu items and photo URLs for one date and meal type."""
+    """1 つの日付・食事区分における、メニュー項目と写真 URL。"""
 
     meal_type: str
     meal_label: str
@@ -94,12 +93,12 @@ class MealRecord:
 
     @property
     def has_content(self) -> bool:
-        """Whether the meal has any recorded menu items or photos."""
+        """メニュー項目か写真が 1 つでも記録されているか。"""
         return bool(self.items) or bool(self.photo_urls)
 
     @property
     def total_energy_kcal(self) -> int:
-        """Sum of the menu items' energy in kcal, ignoring unparseable values."""
+        """メニュー項目のエネルギー (kcal) の合計。数値として解釈できない値は無視する。"""
         total = 0
         for item in self.items:
             try:
@@ -111,7 +110,7 @@ class MealRecord:
 
 @dataclass(frozen=True)
 class NutritionRow:
-    """One nutrient's daily intake, as computed by asken."""
+    """あすけんが算出した、1 栄養素の 1 日の摂取状況。"""
 
     name: str
     status: str  # "over" | "fit" | "short"
@@ -121,11 +120,10 @@ class NutritionRow:
 
 @dataclass(frozen=True)
 class DailySummary:
-    """A day's nutrition summary parsed from asken.
+    """あすけんから解析した 1 日分の栄養サマリー。
 
-    The comment's heading is a generic per-user greeting with no real
-    information ("<name>さんのアドバイスをお伝えしますね。"), so only the body
-    is kept as `comment`.
+    コメントの見出しはユーザー名入りの定型挨拶 ("<name>さんのアドバイスをお伝えしますね。")
+    で情報を持たないため、本文だけを `comment` として保持する。
     """
 
     comment: str
@@ -133,14 +131,14 @@ class DailySummary:
 
 
 class LoginError(RuntimeError):
-    """Raised when authentication to asken.jp does not succeed."""
+    """asken.jp への認証に失敗したときに送出する。"""
 
 
 class AskenClient:
-    """Session-backed client for asken.jp.
+    """asken.jp 向けの、セッション付きクライアント。
 
-    Intended to be reused across cycles: a single session keeps connections
-    alive, and `login` is called again each cycle to refresh authentication.
+    サイクルをまたいで使い回す前提。1 つのセッションで接続を維持し、
+    認証を更新するため `login` を毎サイクル呼び直す。
     """
 
     def __init__(self, email: str, password: str):
@@ -161,20 +159,18 @@ class AskenClient:
         self.close()
 
     def close(self) -> None:
-        """Close the underlying HTTP session."""
+        """内部の HTTP セッションを閉じる。"""
         self.session.close()
 
     def login(self) -> None:
-        """Authenticate against asken.jp, raising LoginError on failure.
+        """asken.jp に認証し、失敗したら LoginError を送出する。
 
-        A no-op if the session's existing cookies are already authenticated:
-        asken.jp then redirects `GET /login` to the top page instead of
-        returning the login form. Require both the redirect and a
-        "logout"-link marker on the landing page before treating this as
-        already-authenticated, since either signal alone (an unrelated
-        redirect away from `/login`, or a coincidental "logout" match
-        elsewhere on the page) could otherwise misclassify a genuine
-        failure.
+        セッションの既存 Cookie がすでに認証済みなら何もしない。その場合 asken.jp は
+        `GET /login` に対してログインフォームを返さず、トップページへリダイレクトする。
+        ただし、どちらか一方のシグナルだけ (`/login` からの無関係なリダイレクト、
+        またはページ内の偶然の "logout" 一致) では本当の失敗を誤判定しうるため、
+        リダイレクトと、遷移先ページの「ログアウト」リンクの目印の両方が揃って
+        初めて認証済みとみなす。
         """
         r = self.session.get(f"{BASE_URL}/login", timeout=30)
         r.raise_for_status()
@@ -206,7 +202,7 @@ class AskenClient:
             raise LoginError("Login failed (no logout link found in response)")
 
     def fetch_meal(self, meal_type: str, date: str) -> MealRecord:
-        """Fetch the menu items and photos for one meal type on one date."""
+        """1 つの日付・食事区分のメニュー項目と写真を取得する。"""
         r = self.session.get(f"{BASE_URL}/wsp/meal/{meal_type}/{date}", timeout=30)
         r.raise_for_status()
 
@@ -241,11 +237,10 @@ class AskenClient:
         )
 
     def fetch_summary(self, date: str) -> DailySummary | None:
-        """Fetch the daily nutrition summary for a date, or None if there is none.
+        """日付の栄養サマリーを取得する。なければ None を返す。
 
-        The date must be passed as a path segment (`/wsp/advice/{date}`); the
-        endpoint silently ignores a `diary_date` query parameter and always
-        returns today's data instead.
+        日付はパスセグメント (`/wsp/advice/{date}`) で渡す必要がある。このエンドポイントは
+        クエリパラメータ `diary_date` を黙って無視し、常に当日のデータを返すため。
         """
         r = self.session.get(f"{BASE_URL}/wsp/advice/{date}", timeout=30)
         r.raise_for_status()
@@ -259,7 +254,7 @@ class AskenClient:
         return DailySummary(comment=_clean_summary_comment(m.group(1)), nutrition=nutrition)
 
     def download_photo(self, url_path: str) -> bytes:
-        """Download a meal photo and return its raw bytes."""
+        """食事の写真をダウンロードし、生のバイト列を返す。"""
         r = self.session.get(f"{BASE_URL}{url_path}", timeout=30)
         r.raise_for_status()
         return r.content

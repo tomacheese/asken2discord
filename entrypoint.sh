@@ -1,5 +1,5 @@
 #!/bin/sh
 set -e
 
-# main.py itself owns the 30-minute retry loop, so this wrapper only launches it once.
+# 取得サイクルのループは main.py 自身が持つため、このラッパーは1回起動するだけ。
 exec python3 src/main.py

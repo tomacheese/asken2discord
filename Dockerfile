@@ -16,8 +16,8 @@ COPY src/ ./src/
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 
-# uid 1000 matches the common single-user host default so the container can write
-# the bind-mounted state and data directories without a --user override.
+# uid 1000 は一般的なシングルユーザーのホストの既定値に合わせている。これにより
+# --user を指定しなくても、バインドマウントした state / data ディレクトリに書き込める。
 RUN useradd --create-home --uid 1000 app \
     && mkdir -p /state /data \
     && chown -R app:app /state /data
