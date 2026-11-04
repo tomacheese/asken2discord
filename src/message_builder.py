@@ -1,10 +1,9 @@
-"""Build the Discord message bodies for a (date, meal) record and a daily summary.
+"""(日付, 食事区分) の記録と日次サマリーから Discord メッセージ本文を組み立てる。
 
-Meal messages are plain text plus image attachments. Only real data (menu,
-calories, photos) is rendered, so self-evident fields such as a meal-type-only
-description are omitted. asken's daily summary covers the whole day rather than
-a single meal, so it is rendered as its own embed message instead of being
-attached to a meal message.
+食事メッセージはプレーンテキストと画像添付で構成する。
+メニュー・カロリー・写真といった実データだけを出力し、食事区分だけの説明のような自明な項目は省く。
+あすけんの日次サマリーは 1 食ではなく 1 日全体を対象とするため、
+食事メッセージに添付せず、独立した embed メッセージとして出力する。
 """
 from __future__ import annotations
 
@@ -16,13 +15,13 @@ _STATUS_EMOJI = {"over": "🔺", "fit": "✅", "short": "🔻"}
 
 
 def _format_title(date_str: str, meal_label: str) -> str:
-    """Format the message heading, e.g. "07/19 朝食"."""
+    """メッセージの見出しを整形する (例: "07/19 朝食")。"""
     d = dt.date.fromisoformat(date_str)
     return f"{d.month:02d}/{d.day:02d} {meal_label}"
 
 
 def _format_items_lines(meal: MealRecord) -> list[str]:
-    """Format each menu item as a "- name xN kcal" line."""
+    """各メニューを "- 名前 xN kcal" 形式の行に整形する。"""
     if not meal.items:
         return ["(写真のみ記録)"]
     lines = []
@@ -41,10 +40,9 @@ def build_meal_message(
     meal: MealRecord,
     photo_files: list[tuple[str, bytes]],
 ) -> tuple[str, list[tuple[str, bytes, str]]]:
-    """Build the Discord webhook (content, files) for one (date, meal) record.
+    """1 件の (日付, 食事区分) 記録から Discord Webhook 用の (content, files) を組み立てる。
 
-    files is [(filename, content_bytes, content_type), ...], attached as plain
-    image attachments.
+    files は [(ファイル名, バイト列, content_type), ...] で、単なる画像添付として付ける。
     """
     parts = [_format_title(date_str, meal.meal_label)]
     parts.extend(_format_items_lines(meal))
@@ -63,11 +61,10 @@ def build_meal_message(
 
 
 def build_summary_embed(*, date_str: str, summary: DailySummary) -> dict:
-    """Build the Discord embed for one day's nutrition summary.
+    """1 日分の栄養サマリーの Discord embed を組み立てる。
 
-    Using an embed, rather than a plain-text message, gives the comment and
-    the nutrition figures their own visually separated container, so no
-    extra code-block formatting is needed for readability.
+    プレーンテキストではなく embed を使うと、コメントと栄養素の数値が視覚的に
+    区切られたコンテナに入るため、読みやすさのためにコードブロック整形を足す必要がない。
     """
     fields = [
         {
