@@ -27,6 +27,7 @@ import sentry_sdk
 from asken_client import MEAL_TYPES, AskenClient, LoginError, MealRecord
 from discord_client import DiscordError, DiscordWebhookClient, MessageNotFound
 from message_builder import build_meal_message, build_summary_embed
+from record_store import build_record, save_record
 import state as state_store
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -163,6 +164,17 @@ def run_cycle(
     for date in track_dates(today, num_days):
         date_str = date.isoformat()
         meals = {meal_type: client.fetch_meal(meal_type, date_str) for meal_type in MEAL_TYPES}
+        summary = client.fetch_summary(date_str)
+
+        # Discord 投稿のスキップ判定より前に保存し、投稿済みの日も毎サイクル更新する。
+        try:
+            save_record(
+                data_dir,
+                date_str,
+                build_record(date_str, meals, summary, dt.datetime.now(JST)),
+            )
+        except OSError:
+            logger.exception("Failed to save record for %s", date_str)
 
         for meal_type, meal in meals.items():
             if not meal.has_content:
@@ -205,7 +217,6 @@ def run_cycle(
                 message_id,
             )
 
-        summary = client.fetch_summary(date_str)
         if summary:
             new_day_hash = day_meals_hash(list(meals.values()))
             summary_slot = state_store.get_slot(state, date_str, SUMMARY_SLOT_KEY)

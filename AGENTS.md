@@ -15,7 +15,7 @@
 - Lint: `flake8` (設定は `.flake8`。除外は `.venv,build,dist` のみ)
 - 起動: `docker compose up --build -d` (`.env` が必要。`.env.example` を参照)
 - 1サイクルだけ動作確認: `RUN_ONCE=1` を付けて実行する (詳細は `README.md`)。
-- テストは存在しない。
+- テスト: `pip install -r requirements-dev.txt` の後、`PYTHONPATH=src python -m unittest discover -s tests` (`src` はパッケージではないため `PYTHONPATH` が必要。CI では実行していない)。
 
 ## アーキテクチャ
 
@@ -24,6 +24,7 @@
 - `src/discord_client.py`: Discord Webhook の投稿 (`?wait=true`) と編集 (PATCH)。
 - `src/message_builder.py`: 食事メッセージ (プレーンテキスト + 画像) と日次サマリー (embed) の組み立て。
 - `src/state.py`: 投稿済みメッセージの内容ハッシュとメッセージ ID を `STATE_FILE` に永続化する。
+- `src/record_store.py`: 食事記録と日次サマリーを `DATA_DIR/<日付>/record.json` に構造化データとして保存する。
 - 設定は環境変数で受け取る。秘匿情報でない変数の既定値は Dockerfile の `ENV` に置き、`Config.from_env()` では必須として読む (コード側で二重に既定値を持たない)。
 
 ## 守るべき不変条件
