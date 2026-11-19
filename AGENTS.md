@@ -11,11 +11,11 @@
 
 ## 開発コマンド
 
-- 依存インストール: `pip install -r requirements-dev.txt` (Python 3.14 想定。Dockerfile のベースイメージは `python:3.14-slim`)
+- 依存インストール: `pip install -r requirements-dev.txt` (Python 3.15 想定。Dockerfile のベースイメージは `python:3.15-slim`)
 - Lint: `flake8` (設定は `.flake8`。除外は `.venv,build,dist` のみ)
 - 起動: `docker compose up --build -d` (`.env` が必要。`.env.example` を参照)
 - 1サイクルだけ動作確認: `RUN_ONCE=1` を付けて実行する (詳細は `README.md`)。
-- テスト: `pip install -r requirements-dev.txt` の後、`PYTHONPATH=src python -m unittest discover -s tests` (`src` はパッケージではないため `PYTHONPATH` が必要。CI では実行していない)。
+- テスト: `pip install -r requirements-dev.txt` の後、`PYTHONPATH=src python -m unittest discover -s tests` (`src` はパッケージではないため `PYTHONPATH` が必要。PR の CI (`.github/workflows/python-test.yml`) で実行している)。
 
 ## アーキテクチャ
 
