@@ -27,9 +27,12 @@ class DiscordFailureTest(unittest.TestCase):
         for method, slot in (("post", None), ("patch", {"message_id": "456"})):
             with self.subTest(method=method):
                 transport = EventTransport()
-                with sentry_sdk.init(
+                sentry_client = sentry_sdk.Client(
                     dsn="https://public@example.com/1", transport=transport
-                ):
+                )
+                self.addCleanup(sentry_client.close)
+                with sentry_sdk.isolation_scope():
+                    sentry_sdk.get_current_scope().set_client(sentry_client)
                     with DiscordWebhookClient(url) as client:
                         try:
                             raise OSError(f"connection failed: {url}")
