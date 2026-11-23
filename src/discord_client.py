@@ -1,4 +1,5 @@
 """Discord Webhook へのメッセージ投稿・編集を行う薄いクライアント。"""
+
 from __future__ import annotations
 
 import json
@@ -57,14 +58,27 @@ class DiscordWebhookClient:
         過去のメッセージ形式の embed が残ってしまう。
         """
         attachments = [
-            {"id": idx, "filename": filename} for idx, (filename, _, _) in enumerate(files)
+            {"id": idx, "filename": filename}
+            for idx, (filename, _, _) in enumerate(files)
         ]
-        payload = {"content": content, "attachments": attachments, "embeds": embeds or []}
+        payload = {
+            "content": content,
+            "attachments": attachments,
+            "embeds": embeds or [],
+        }
         multipart_files = {
-            "payload_json": (None, json.dumps(payload, ensure_ascii=False), "application/json")
+            "payload_json": (
+                None,
+                json.dumps(payload, ensure_ascii=False),
+                "application/json",
+            )
         }
         for idx, (filename, file_content, content_type) in enumerate(files):
-            multipart_files[f"files[{idx}]"] = (filename, file_content, content_type)
+            multipart_files[f"files[{idx}]"] = (
+                filename,
+                file_content,
+                content_type,
+            )
         return multipart_files
 
     def post_message(
@@ -80,7 +94,9 @@ class DiscordWebhookClient:
             timeout=30,
         )
         if resp.status_code >= 300:
-            raise DiscordError(f"Discord POST failed: {resp.status_code} {resp.text}")
+            raise DiscordError(
+                f"Discord POST failed: {resp.status_code} {resp.text}"
+            )
         return resp.json()["id"]
 
     def edit_message(
@@ -104,4 +120,6 @@ class DiscordWebhookClient:
             logger.warning("message %s not found, will re-create", message_id)
             raise MessageNotFound(message_id)
         if resp.status_code >= 300:
-            raise DiscordError(f"Discord PATCH failed: {resp.status_code} {resp.text}")
+            raise DiscordError(
+                f"Discord PATCH failed: {resp.status_code} {resp.text}"
+            )

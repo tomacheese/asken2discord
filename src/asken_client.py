@@ -2,6 +2,7 @@
 
 `requests` だけを使い、ブラウザ自動化は使わない。
 """
+
 from __future__ import annotations
 
 import html
@@ -203,23 +204,26 @@ class AskenClient:
 
     def fetch_meal(self, meal_type: str, date: str) -> MealRecord:
         """1 つの日付・食事区分のメニュー項目と写真を取得する。"""
-        r = self.session.get(f"{BASE_URL}/wsp/meal/{meal_type}/{date}", timeout=30)
+        r = self.session.get(
+            f"{BASE_URL}/wsp/meal/{meal_type}/{date}", timeout=30
+        )
         r.raise_for_status()
 
-        items = []
         m = EAT_DATAS_RE.search(r.text)
-        if m:
-            eat_datas = json.loads(m.group(1))
-            for item_hash, item in eat_datas.items():
-                items.append(
-                    {
-                        "item_hash": item_hash,
-                        "menu_id": item.get("menu_id"),
-                        "menu_name": item.get("menu_name"),
-                        "quantity": item.get("menu_quantity"),
-                        "energy_kcal": item.get("energy"),
-                    }
-                )
+        if not m:
+            raise ValueError("Meal data not found in response")
+        eat_datas = json.loads(m.group(1))
+        items = []
+        for item_hash, item in eat_datas.items():
+            items.append(
+                {
+                    "item_hash": item_hash,
+                    "menu_id": item.get("menu_id"),
+                    "menu_name": item.get("menu_name"),
+                    "quantity": item.get("menu_quantity"),
+                    "energy_kcal": item.get("energy"),
+                }
+            )
 
         photo_paths = sorted(set(PHOTO_PATH_RE.findall(r.text)))
         photo_hashes: dict[str, str] = {}
@@ -227,7 +231,9 @@ class AskenClient:
             parts = p.rstrip("/").split("/")
             if len(parts) >= 5:
                 photo_hash = parts[-2]
-                photo_hashes[photo_hash] = "/".join(parts[:-1]) + "/fit_380x380"
+                photo_hashes[photo_hash] = (
+                    "/".join(parts[:-1]) + "/fit_380x380"
+                )
 
         return MealRecord(
             meal_type=meal_type,
@@ -248,10 +254,19 @@ class AskenClient:
         if not m:
             return None
         nutrition = [
-            NutritionRow(name=name, status=status, value=value, target_range=target_range)
-            for name, status, value, target_range in NUTRITION_ROW_RE.findall(r.text)
+            NutritionRow(
+                name=name,
+                status=status,
+                value=value,
+                target_range=target_range,
+            )
+            for name, status, value, target_range in NUTRITION_ROW_RE.findall(
+                r.text
+            )
         ]
-        return DailySummary(comment=_clean_summary_comment(m.group(1)), nutrition=nutrition)
+        return DailySummary(
+            comment=_clean_summary_comment(m.group(1)), nutrition=nutrition
+        )
 
     def download_photo(self, url_path: str) -> bytes:
         """食事の写真をダウンロードし、生のバイト列を返す。"""

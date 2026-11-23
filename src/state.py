@@ -3,6 +3,7 @@
 状態ファイルはマウントしたボリューム上に置く。これにより、コンテナを再起動しても
 既存メッセージを編集するか新規投稿するかを判断できる。
 """
+
 from __future__ import annotations
 
 import json
@@ -20,7 +21,9 @@ def save_state(path: Path, state: dict) -> None:
     """一時ファイルに書いてからリネームすることで、状態を原子的に書き込む。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     tmp.replace(path)
 
 
@@ -30,7 +33,12 @@ def get_slot(state: dict, date_str: str, meal_type: str) -> dict | None:
 
 
 def set_slot(
-    state: dict, date_str: str, meal_type: str, *, content_hash: str, message_id: str
+    state: dict,
+    date_str: str,
+    meal_type: str,
+    *,
+    content_hash: str,
+    message_id: str,
 ) -> None:
     """(日付, 食事区分) のスロットに内容ハッシュとメッセージ ID を記録する。"""
     state.setdefault(date_str, {})[meal_type] = {

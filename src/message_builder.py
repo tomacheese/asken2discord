@@ -45,7 +45,7 @@ def build_meal_message(
     files は [(ファイル名, バイト列, content_type), ...] で、単なる画像添付として付ける。
     """
     parts = [_format_title(date_str, meal.meal_label)]
-    parts.extend(_format_items_lines(meal))
+    parts.extend(_format_items_lines(meal) if meal.has_content else ["(削除済み)"])
 
     if meal.items:
         parts.append("")

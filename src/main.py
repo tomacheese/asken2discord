@@ -7,6 +7,7 @@
 各サイクルでは、あすけんにログインして対象日・食事区分を取得し、
 前回サイクルから出力内容が変わった食事・サマリーについて Discord メッセージを投稿または編集する。
 """
+
 from __future__ import annotations
 
 import datetime as dt
@@ -47,7 +48,7 @@ logger = logging.getLogger("asken2discord")
 
 # message_builder の出力形式を変えたときに上げる。再計算したハッシュが保存済みの
 # ものと一致しなくなり、投稿済みメッセージが再描画される。
-MESSAGE_FORMAT_VERSION = 6
+MESSAGE_FORMAT_VERSION = 7
 
 # 日次サマリーの状態スロットのキー。"advice" のまま変えてはいけない。
 # 投稿済みサマリーメッセージが state.json に保存されているキーであり、変更すると
@@ -86,7 +87,8 @@ class Config:
             interval_seconds=int(os.environ["INTERVAL_SECONDS"]),
             state_path=Path(os.environ["STATE_FILE"]),
             data_dir=Path(os.environ["DATA_DIR"]),
-            run_once=os.environ.get("RUN_ONCE", "").lower() in ("1", "true", "yes"),
+            run_once=os.environ.get("RUN_ONCE", "").lower()
+            in ("1", "true", "yes"),
         )
 
 
@@ -140,7 +142,9 @@ def _post_or_edit(
         try:
             if slot:
                 try:
-                    discord.edit_message(slot["message_id"], content, files, embeds)
+                    discord.edit_message(
+                        slot["message_id"], content, files, embeds
+                    )
                     return slot["message_id"]
                 except MessageNotFound:
                     return discord.post_message(content, files, embeds)
@@ -148,7 +152,9 @@ def _post_or_edit(
         except (DiscordError, requests.RequestException) as exc:
             scope.clear_breadcrumbs()
             logger.error(
-                "Discord post/edit failed for %s (%s)", log_context, type(exc).__name__
+                "Discord post/edit failed for %s (%s)",
+                log_context,
+                type(exc).__name__,
             )
             return None
 
@@ -174,7 +180,9 @@ def _download_photos(
             photos_dir.mkdir(parents=True, exist_ok=True)
             (photos_dir / f"{meal_type}_{i}.jpg").write_bytes(photo_bytes)
         except OSError:
-            logger.exception("Failed to save photo for %s %s", date_str, meal_type)
+            logger.exception(
+                "Failed to save photo for %s %s", date_str, meal_type
+            )
     return photo_files
 
 
@@ -192,7 +200,10 @@ def run_cycle(
 
     for date in track_dates(today, num_days):
         date_str = date.isoformat()
-        meals = {meal_type: client.fetch_meal(meal_type, date_str) for meal_type in MEAL_TYPES}
+        meals = {
+            meal_type: client.fetch_meal(meal_type, date_str)
+            for meal_type in MEAL_TYPES
+        }
         summary = client.fetch_summary(date_str)
 
         # Discord 投稿のスキップ判定より前に保存し、投稿済みの日も毎サイクル更新する。
@@ -206,19 +217,23 @@ def run_cycle(
             logger.exception("Failed to save record for %s", date_str)
 
         for meal_type, meal in meals.items():
-            if not meal.has_content:
+            slot = state_store.get_slot(state, date_str, meal_type)
+            if not meal.has_content and not slot:
                 continue
 
             new_hash = content_hash(meal)
 
-            slot = state_store.get_slot(state, date_str, meal_type)
             if slot and slot["hash"] == new_hash:
                 continue
 
             try:
-                photo_files = _download_photos(client, data_dir, date_str, meal_type, meal)
+                photo_files = _download_photos(
+                    client, data_dir, date_str, meal_type, meal
+                )
             except requests.RequestException:
-                logger.exception("Failed to download photo for %s %s", date_str, meal_type)
+                logger.exception(
+                    "Failed to download photo for %s %s", date_str, meal_type
+                )
                 continue
 
             message_content, files = build_meal_message(
@@ -228,13 +243,21 @@ def run_cycle(
             )
 
             message_id = _post_or_edit(
-                discord, slot, message_content, files, log_context=f"{date_str} {meal_type}"
+                discord,
+                slot,
+                message_content,
+                files,
+                log_context=f"{date_str} {meal_type}",
             )
             if message_id is None:
                 continue
 
             state_store.set_slot(
-                state, date_str, meal_type, content_hash=new_hash, message_id=message_id
+                state,
+                date_str,
+                meal_type,
+                content_hash=new_hash,
+                message_id=message_id,
             )
             logger.info(
                 "%s %s -> %s (message_id=%s)",
@@ -246,7 +269,9 @@ def run_cycle(
 
         if summary:
             new_day_hash = day_meals_hash(list(meals.values()))
-            summary_slot = state_store.get_slot(state, date_str, SUMMARY_SLOT_KEY)
+            summary_slot = state_store.get_slot(
+                state, date_str, SUMMARY_SLOT_KEY
+            )
             if not summary_slot or summary_slot["hash"] != new_day_hash:
                 embed = build_summary_embed(date_str=date_str, summary=summary)
                 message_id = _post_or_edit(
@@ -277,7 +302,9 @@ def run_cycle(
 
 def _request_shutdown(signum: int, frame: FrameType | None) -> None:
     """現在のサイクルの終了後にメインループを止めるよう要求するシグナルハンドラ。"""
-    logger.info("Received signal %s, shutting down after current cycle", signum)
+    logger.info(
+        "Received signal %s, shutting down after current cycle", signum
+    )
     _shutdown.set()
 
 
@@ -312,7 +339,9 @@ def main() -> None:
 
             if config.run_once:
                 break
-            logger.info("Sleeping %s seconds until next cycle", config.interval_seconds)
+            logger.info(
+                "Sleeping %s seconds until next cycle", config.interval_seconds
+            )
             if _shutdown.wait(config.interval_seconds):
                 break
 
